@@ -493,6 +493,12 @@ function killInteractive(scene, o) {
   }
 }
 
+/* Надійний перехід між сценами: start + примусовий процесинг черги менеджера. */
+function gotoScene(scene, key, data) {
+  scene.scene.start(key, data);
+  try { scene.scene.manager.processQueue(); } catch (e) {}
+}
+
 /** Кнопка: контейнер graphics+text з hover/press-ефектами. */
 function makeButton(scene, x, y, w, h, label, opts) {
   opts = opts || {};
@@ -744,7 +750,7 @@ class MenuScene extends Phaser.Scene {
     } else {
       zone.on('pointerover', () => { c.setScale(1.04); this.game.canvas.style.cursor = 'pointer'; });
       zone.on('pointerout', () => { c.setScale(1); this.game.canvas.style.cursor = 'default'; });
-      zone.on('pointerdown', () => { SoundKit.click(); this.scene.start('Level', { levelId: lv.id }); });
+      zone.on('pointerdown', () => { SoundKit.click(); gotoScene(this, 'Level', { levelId: lv.id }); });
     }
   }
 
@@ -844,6 +850,8 @@ class LevelScene extends Phaser.Scene {
     this.locked = false;
     this.resolvedChars = {};
     this.artifactTaken = false;
+    this.completionShown = false;   // ВАЖЛИВО: скидаємо прапорець завершення для нового рівня
+    this.activeDialog = null;       // не тягнемо посилання на діалог минулого рівня
 
     this.cameras.main.setBackgroundColor(COLORS.bgDark);
 
@@ -1196,44 +1204,55 @@ class LevelScene extends Phaser.Scene {
       this.completionShown = true;
       this.locked = true;
       this.game.canvas.style.cursor = 'default';
-      // Затримка через tween-лічильник (надійніше за scene timers у всіх середовищах)
-      this.tweens.addCounter({
-        from: 0, to: 1, duration: 700,
-        onComplete: () => { if (this.scene.isActive()) this.showCompletion(); }
-      });
+      // Незалежна від ігрового циклу затримка (таймери сцени/tweens у деяких
+      // середовищах не викликають scene.start надійно з своїх callback'ів)
+      window.setTimeout(() => {
+        if (this.scene.isActive() && this.completionShown) this.showCompletion();
+      }, 700);
     }
   }
 
   showCompletion() {
-    SoundKit.win();
     GameState.completeLevel(this.levelId);
+    SoundKit.win();
     const isLast = this.levelId >= GAME_SCRIPT.length;
 
-    const dim = this.add.rectangle(512, 384, 1024, 768, 0x000000, 0).setDepth(950).setInteractive();
-    this.tweens.add({ targets: dim, fillAlpha: 0.82, duration: 500 });
+    // 1) Повністю глушимо весь input сцени — жодних «привидів» під оверлеєм
+    (this.input._list || []).slice().forEach(o => { try { o.disableInteractive(); } catch (e) {} });
 
-    const W = 760, H = 400;
-    const cont = this.add.container(512, 384).setDepth(960).setAlpha(0);
-    const panel = this.add.graphics();
-    roundRect(panel, -W / 2, -H / 2, W, H, 22, COLORS.panel, 0.99, COLORS.accent, 3);
-    const title = this.add.text(0, -H / 2 + 56, '🏅 РІВЕНЬ ЗАВЕРШЕНО!', {
+    // 2) Оверлей завершення
+    const dim = this.add.rectangle(512, 384, 1024, 768, 0x000000, 0).setDepth(950);
+    this.tweens.add({ targets: dim, fillAlpha: 0.82, duration: 400 });
+    const W = 760, H = 420;
+    const panel = this.add.graphics().setDepth(960);
+    roundRect(panel, 512 - W / 2, 384 - H / 2, W, H, 22, COLORS.panel, 0.99, COLORS.accent, 3);
+    this.add.text(512, 384 - H / 2 + 62, '🏅 РІВЕНЬ ' + this.levelId + ' ЗАВЕРШЕНО!', {
       fontFamily: FONT, fontSize: 36, fontStyle: 'bold', color: '#ff6b35'
-    }).setOrigin(0.5);
-    const concl = this.add.text(0, -40, '💡 ' + this.level.conclusion, {
+    }).setOrigin(0.5).setDepth(961);
+    this.add.text(512, 344, '💡 ' + this.level.conclusion, {
       fontFamily: FONT, fontSize: 23, color: '#eaf2ff', wordWrap: { width: W - 110 }, align: 'center', lineSpacing: 6
-    }).setOrigin(0.5);
-    const stats = this.add.text(0, 60, '📋 Факти: 3/3      💚 Емпатія: ' + GameState.data.empathy + '%', {
+    }).setOrigin(0.5).setDepth(961);
+    this.add.text(512, 424, '📋 Факти: 3/3      💚 Емпатія: ' + GameState.data.empathy + '%', {
       fontFamily: FONT, fontSize: 20, color: '#9fb0cc'
-    }).setOrigin(0.5);
-    const btn = makeButton(this, 0, H / 2 - 62, 340, 60, isLast ? '🌟 До фіналу' : '➡️ Наступний рівень', {
-      stroke: COLORS.green, fill: 0x14301f, fillHover: 0x1b4029, fontSize: 23,
-      onClick: () => {
-        if (isLast) this.scene.start('Final');
-        else this.scene.start('Level', { levelId: this.levelId + 1 });
-      }
+    }).setOrigin(0.5).setDepth(961);
+
+    // 3) Кнопка як scene-level Zone (максимальна надійність hit-test'у)
+    const bw = 380, bh = 62, bx = 512, by = 384 + H / 2 - 66;
+    const bg = this.add.graphics().setDepth(961);
+    const paint = (fill) => { bg.clear(); roundRect(bg, bx - bw / 2, by - bh / 2, bw, bh, 12, fill, 0.96, COLORS.green, 2.5); };
+    paint(0x14301f);
+    this.add.text(bx, by, isLast ? '🌟 До фіналу' : '➡️ Наступний рівень', {
+      fontFamily: FONT, fontSize: 23, fontStyle: 'bold', color: '#eaf2ff'
+    }).setOrigin(0.5).setDepth(962);
+    const zone = this.add.zone(bx, by, bw, bh).setInteractive().setDepth(963);
+    zone.on('pointerover', () => { paint(0x1b4029); this.game.canvas.style.cursor = 'pointer'; });
+    zone.on('pointerout', () => { paint(0x14301f); this.game.canvas.style.cursor = 'default'; });
+    zone.on('pointerdown', () => {
+      SoundKit.click();
+      zone.disableInteractive();
+      if (isLast) gotoScene(this, 'Final');
+      else gotoScene(this, 'Level', { levelId: this.levelId + 1 });
     });
-    cont.add([panel, title, concl, stats, btn]);
-    this.tweens.add({ targets: cont, alpha: 1, duration: 400, delay: 350 });
   }
 }
 
@@ -1279,11 +1298,11 @@ class FinalScene extends Phaser.Scene {
     this.add.text(512, 386, '📞 КОНТАКТИ ДОПОМОГИ (Україна)', {
       fontFamily: FONT, fontSize: 26, fontStyle: 'bold', color: '#4ade80'
     }).setOrigin(0.5);
-    this.add.text(512, 428, [
+    this.add.text(512, 416, [
       'Дитяча гаряча лінія: 0 800 500 225 (безкоштовно)',
       'Ла Страда (протидія насильству): 0 800 500 335',
       'Поліція: 102   |   Швидка: 103'
-    ].join('\n'), { fontFamily: FONT, fontSize: 22, color: '#eaf2ff', align: 'center', lineSpacing: 8 }).setOrigin(0.5);
+    ].join('\n'), { fontFamily: FONT, fontSize: 22, color: '#eaf2ff', align: 'center', lineSpacing: 8 }).setOrigin(0.5, 0);
     this.add.text(512, 532, 'Поруч завжди є люди, готові допомогти. Твій голос має значення.', {
       fontFamily: FONT, fontSize: 17, color: '#9fb0cc', wordWrap: { width: 540 }, align: 'center'
     }).setOrigin(0.5);
@@ -1298,7 +1317,7 @@ class FinalScene extends Phaser.Scene {
     });
     makeButton(this, 668, 640, 240, 62, '🏠 До меню', {
       stroke: COLORS.panelLine, fill: 0x1b2440, fillHover: 0x27345c, fontSize: 22,
-      onClick: () => this.scene.start('Menu')
+      onClick: () => gotoScene(this, 'Menu')
     });
 
     this.add.text(512, 726, 'Дякуємо, що граєш у «16 днів: Голос, який чути» 💚', {
