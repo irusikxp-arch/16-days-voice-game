@@ -1,0 +1,1337 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>16 днів: Голос, який чути — освітня гра</title>
+<!--
+  ============================================================================
+  «16 ДНІВ: ГОЛОС, ЯКИЙ ЧУТИ»
+  Освітня point-and-click гра / візуальна новела для підлітків 10–17 років.
+  Тема: протидія насильству (булінг, кібербулінг, домашнє насильство, сталкінг).
+  ----------------------------------------------------------------------------
+  • Один файл: HTML + CSS + JS + Phaser 3 (CDN).
+  • Запускається локально (file://) без CORS-помилок: усі ассети опціональні,
+    за відсутності файлу малюється кольоровий прямокутник-плейсхолдер.
+  • Прогрес (рівень, емпатія, артефакти, пройдені рівні) — у localStorage.
+  ============================================================================
+-->
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #05070d;
+    overflow: hidden;
+  }
+  #game-container { width: 100%; height: 100%; }
+  #game-container canvas { display: block; }
+  #fatal {
+    position: fixed; inset: 0; display: none;
+    align-items: center; justify-content: center;
+    color: #ffd7cd; font-family: 'Trebuchet MS', 'Segoe UI', sans-serif;
+    font-size: 20px; text-align: center; padding: 24px; box-sizing: border-box;
+    background: #0a0e1a;
+  }
+</style>
+</head>
+<body>
+<div id="game-container"></div>
+<div id="fatal">Не вдалося завантажити рушій Phaser 3 з CDN.<br>Перевірте підключення до інтернету та оновіть сторінку.</div>
+
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.70.0/dist/phaser.min.js"></script>
+<script>
+'use strict';
+
+/* ============================================================================
+ * 0. ЗАХИСТ: якщо CDN не відповів — показуємо повідомлення замість білого екрана
+ * ==========================================================================*/
+window.addEventListener('load', function () {
+  if (typeof Phaser === 'undefined') {
+    var f = document.getElementById('fatal');
+    if (f) f.style.display = 'flex';
+  }
+});
+
+/* ============================================================================
+ * 1. СЦЕНАРІЙ ГРИ (усі тексти рівнів — редагуються тут)
+ * ==========================================================================*/
+const GAME_SCRIPT = [
+  {
+    id: 1,
+    title: 'Шкільний двір',
+    topic: 'Булінг',
+    emoji: '🏫',
+    bgImage: 'school_yard.png',
+    conclusion: 'Булінг потребує втручання дорослих та підтримки свідків.',
+    artifact: {
+      image: 'phone.png', emoji: '📱', label: 'Телефон на землі',
+      x: 520, y: 655, factValue: 1,
+      text: 'Ти знайшов телефон. На екрані відкрита група, де ображають Аню. Це доказ кібербулінгу.'
+    },
+    characters: [
+      {
+        image: 'anya.png', happyImage: 'anya_happy.png', name: 'Аня',
+        x: 300, y: 725,
+        situation: 'Аня стоїть, опустивши голову. Усю ніч її ображали в груповому чаті, а вранці це «жарт» повторили у дворі.',
+        options: [
+          { text: '«Та заспокойся, це просто дрібниці.»', correct: false, empathyChange: -10,
+            feedback: 'Ігнорування посилює самотність жертви: Аня вирішить, що її біль «не важливий» ні для кого.' },
+          { text: '«Я бачу, що тобі боляче. Я поруч.»', correct: true, empathyChange: 15, factValue: 1,
+            feedback: 'Аня відчуває підтримку. Визнання болю й присутність поруч — перший крок до безпеки.' }
+        ]
+      },
+      {
+        image: 'marina.png', happyImage: 'marina_brave.png', name: 'Марина',
+        x: 760, y: 725,
+        situation: 'Марина бачила все, але боїться втрутитися: раптом наступною жертвою стане вона?',
+        options: [
+          { text: '«Чому ти мовчиш? Ти теж винна!»', correct: false, empathyChange: -10,
+            feedback: 'Звинувачення свідка змушує його закритися: тепер Марина мовчатиме навіть наодинці з тобою.' },
+          { text: '«Давай разом підійдемо до вчителя.»', correct: true, empathyChange: 15, factValue: 1,
+            feedback: 'Разом зі свідком ваша заява стає сильною. Свідки — не боягузи, їм теж потрібен союзник.' }
+        ]
+      }
+    ]
+  },
+  {
+    id: 2,
+    title: 'Класна кімната',
+    topic: 'Кібербулінг',
+    emoji: '💻',
+    bgImage: 'classroom.png',
+    conclusion: 'В інтернеті все фіксується. Твоя підтримка в приватних повідомленнях рятує.',
+    artifact: {
+      image: 'notice.png', emoji: '📄', label: 'Роздруківка чату',
+      x: 520, y: 610, factValue: 1,
+      text: 'На столі роздруківка групового чату. Тут чітко видно, як Максима систематично виганяють і принижують.'
+    },
+    characters: [
+      {
+        image: 'player.png', happyImage: null, name: 'Максим',
+        x: 300, y: 725,
+        situation: 'Максим сидить за комп’ютером, виглядає пригніченим: у чаті класу його знову «жартівливо» вигнали з групи.',
+        options: [
+          { text: '«Забий, просто створи новий чат.»', correct: false, empathyChange: -10,
+            feedback: 'Втеча не зупиняє переслідувачів: вони підуть за ним у новий чат, а докази буде втрачено.' },
+          { text: '«Зроби скріншоти всіх образ. Це юридичні докази.»', correct: true, empathyChange: 15, factValue: 1,
+            feedback: 'Зафіксові докази (скріншоти, дати, ніки) — основа для скарги платформі та поліції.' }
+        ]
+      },
+      {
+        image: 'marina.png', happyImage: 'marina_brave.png', name: 'Однокласниця',
+        x: 760, y: 725,
+        situation: 'Однокласниця бачить це, але боїться стати ізгоєм, якщо заступиться публічно.',
+        options: [
+          { text: '«Мовчи, бо тебе теж забанять.»', correct: false, empathyChange: -10,
+            feedback: 'Мовчазна згода більшості — пальне для булінгу. Страх не має диктувати мораль.' },
+          { text: '«Напиши Максиму в особисті, що ти його підтримуєш.»', correct: true, empathyChange: 15, factValue: 1,
+            feedback: 'Приватна підтримка безпечна для свідка й життєво важлива для жертви: вона знімає відчуття ізоляції.' }
+        ]
+      }
+    ]
+  },
+  {
+    id: 3,
+    title: 'Дім',
+    topic: 'Домашнє насильство',
+    emoji: '🏠',
+    bgImage: 'home.png',
+    conclusion: 'Домашнє насильство — це злочин, а не «сімейна справа».',
+    artifact: {
+      image: 'books.png', emoji: '📚', label: 'Підручники на підлозі',
+      x: 520, y: 665, factValue: 1,
+      text: 'Підручники розкидані на підлозі. Оля не може робити уроки, бо вдома постійні скандали.'
+    },
+    characters: [
+      {
+        image: 'anya.png', happyImage: 'anya_happy.png', name: 'Оля',
+        x: 300, y: 725,
+        situation: 'Оля сидить у кутку, обійнявши коліна. Учора вчергове була крики, і вона не спала всю ніч.',
+        options: [
+          { text: '«Це твоя сім’я, не винось сміття з хати.»', correct: false, empathyChange: -10,
+            feedback: 'Така порада змушує дитину приховувати насильство роками. Безпека важливіша за «репутацію сім’ї».' },
+          { text: '«Те, що відбувається вдома, — ніколи не є твоєю виною.»', correct: true, empathyChange: 15, factValue: 1,
+            feedback: 'Зняття провини з дитини — ключовий крок: вона починає розуміти, що має право на захист.' }
+        ]
+      },
+      {
+        image: 'teacher.png', happyImage: null, name: 'Сусідка',
+        x: 760, y: 725,
+        situation: 'Сусідка чує крики через стіну, але вагається: «Раптом я все зіпсую своїм втручанням?»',
+        options: [
+          { text: '«Це не ваша справа, не втручайтесь.»', correct: false, empathyChange: -10,
+            feedback: 'Байдужість сусідів — найчастіша причина, чому домашнє насильство триває роками.' },
+          { text: '«Ви можете анонімно повідомити службу у справах дітей.»', correct: true, empathyChange: 15, factValue: 1,
+            feedback: 'Анонімне повідомлення запускає перевірку родини й може врятувати дитину без ескалації конфлікту.' }
+        ]
+      }
+    ]
+  },
+  {
+    id: 4,
+    title: 'Цифровий простір',
+    topic: 'Сексторшн / шантаж',
+    emoji: '📱',
+    bgImage: 'phone_digital.png',
+    conclusion: 'Сексторшн — це кримінал. Ніколи не виконуй вимоги шантажиста.',
+    artifact: {
+      image: null, emoji: '✨', label: 'Заблокований профіль',
+      x: 520, y: 430, factValue: 1,
+      text: 'Фейковий профіль, створений з фото Каті. Ти зберігаєш посилання на нього як доказ.'
+    },
+    characters: [
+      {
+        image: 'anya.png', happyImage: 'anya_happy.png', name: 'Катя',
+        x: 300, y: 725,
+        situation: 'Катя в паніці: незнайомець погрожує розіслати її приватні фото всім контактам, якщо вона не виконає «вимоги».',
+        options: [
+          { text: '«Виконай їхні вимоги, щоб вони відстали.»', correct: false, empathyChange: -10,
+            feedback: 'Поступки шантажисту не зупиняють: апетит зростає з кожною поступкою. Це пастка без виходу.' },
+          { text: '«Нічого не відповідай. Заблокуй і збережи переписку.»', correct: true, empathyChange: 15, factValue: 1,
+            feedback: 'Мовчання + блокування + збережені докази позбавляють шантажиста важелів тиску.' }
+        ]
+      },
+      {
+        image: 'marina_brave.png', happyImage: null, name: 'Подруга',
+        x: 760, y: 725,
+        situation: 'Подруга хоче допомогти, але не знає як: ситуація виглядає «надто серйозною для дітей».',
+        options: [
+          { text: '«Навіщо ти взагалі такі фото робила?»', correct: false, empathyChange: -10,
+            feedback: 'Це victim blaming: відповідальність завжди несе шантажист, а не жертва. Таким питанням ти додаєш сорому.' },
+          { text: '«Ми підемо до шкільного психолога і поліції прямо зараз.»', correct: true, empathyChange: 15, factValue: 1,
+            feedback: 'Сексторшн щодо неповнолітніх — кримінальне правопорушення. Дорослі та поліція — обов’язкова ланка захисту.' }
+        ]
+      }
+    ]
+  },
+  {
+    id: 5,
+    title: 'Торговий центр',
+    topic: 'Домагання',
+    emoji: '🏪',
+    bgImage: 'mall.png',
+    conclusion: 'Твоє тіло — твої кордони. Гучний опір і звернення до охорони рятують життя.',
+    artifact: {
+      image: null, emoji: '📹', label: 'Камера спостереження',
+      x: 872, y: 170, factValue: 1,
+      text: 'Камера спостереження. Ти запам’ятовуєш її номер, щоб охорона могла переглянути запис.'
+    },
+    characters: [
+      {
+        image: 'anya.png', happyImage: 'anya_happy.png', name: 'Ірина',
+        x: 300, y: 725,
+        situation: 'Ірина затиснута в кутку коридору ТЦ: незнайомий чоловік «жартує» і не випускає її зі свого простору.',
+        options: [
+          { text: '«Завмри і мовчи, щоб не привертати увагу.»', correct: false, empathyChange: -10,
+            feedback: 'Тиша грає на руку нападнику: він розраховує, що жертву «не помітять». Гучність — твоя зброя.' },
+          { text: '«Голосно скажи: “Відійди від мене, я тебе не знаю!”»', correct: true, empathyChange: 15, factValue: 1,
+            feedback: 'Гучний чіткий опір привертає увагу оточення та руйнує сценарій «тихого» насильства.' }
+        ]
+      },
+      {
+        image: 'teacher.png', happyImage: null, name: 'Охоронець',
+        x: 760, y: 725,
+        situation: 'Охоронець проходить повз. У тебе є лічені секунди, щоб сформулювати прохання.',
+        options: [
+          { text: 'Сказати: «Мені здалося, він дивно дивиться…»', correct: false, empathyChange: -10,
+            feedback: 'Неконкретне прохання легко проігнорувати: охорона не зобов’язана реагувати на «здалося».' },
+          { text: 'Чітко описати чоловіка і попросити безпечно провести до виходу.', correct: true, empathyChange: 15, factValue: 1,
+            feedback: 'Конкретика (одяг, місце, дія) + пряме прохання про супровід = чіткий протокол дій охорони.' }
+        ]
+      }
+    ]
+  },
+  {
+    id: 6,
+    title: 'Спортзал',
+    topic: 'Фізичний тиск',
+    emoji: '⚽',
+    bgImage: 'gym.png',
+    conclusion: 'Токсична маскулінність руйнує психіку. Жарт, від якого боляче — це насильство.',
+    artifact: {
+      image: null, emoji: '📋', label: 'Журнал обліку відвідувань',
+      x: 165, y: 610, factValue: 1,
+      text: 'Журнал обліку відвідувань. Тут зафіксовано, що Діму змушували залишатися після тренувань для «прибирання».'
+    },
+    characters: [
+      {
+        image: 'player.png', happyImage: null, name: 'Діма',
+        x: 300, y: 725,
+        situation: 'Діму оточили старшокласники: вони «по-дружньому» штовхають його та вимагають прибрати зал самотужки.',
+        options: [
+          { text: '«Потерпи, так усі проходять, щоб стати своїм.»', correct: false, empathyChange: -10,
+            feedback: 'Ритуали «посвяти» через приниження — це насильство, а не традиція. Терпіння його легітимізує.' },
+          { text: '«Відмовся і негайно йди до тренера або директора.»', correct: true, empathyChange: 15, factValue: 1,
+            feedback: 'Швидке звернення до дорослого, який відповідає за простір, зупиняє ескалацію негайно.' }
+        ]
+      },
+      {
+        image: 'oleg.png', happyImage: null, name: 'Олег',
+        x: 760, y: 725,
+        situation: 'Олег каже, що це «просто жарт» і що Діма «не розуміє гумору».',
+        options: [
+          { text: 'Почати бійку, щоб довести, що ти не слабак.', correct: false, empathyChange: -10,
+            feedback: 'Бійка перетворює жертву на «співучасника бійки» — і докази, і симпатія дорослих будуть втрачені.' },
+          { text: 'Сказати: «Це не жарт, це насильство. Я фіксую це на телефон.»', correct: true, empathyChange: 15, factValue: 1,
+            feedback: 'Називання речей своїми іменами та фіксація доказів знімає з кривдника маску «жартівливості».' }
+        ]
+      }
+    ]
+  },
+  {
+    id: 7,
+    title: 'Кабінет психолога',
+    topic: 'Звітування та права',
+    emoji: '🏛️',
+    bgImage: 'psychologist.png',
+    conclusion: 'Емоції важливі, але для захисту потрібні чіткі факти та знання своїх прав.',
+    artifact: {
+      image: null, emoji: '📞', label: 'Візитка гарячої лінії',
+      x: 520, y: 585, factValue: 1,
+      text: 'Ти береш візитку Національної дитячої гарячої лінії. Тепер цей номер завжди з тобою.'
+    },
+    characters: [
+      {
+        image: 'psychologist.png', happyImage: null, name: 'Психологиня',
+        x: 300, y: 725,
+        situation: 'Психологиня готова вислухати. Від того, як ти побудуєш розповідь, залежить швидкість допомоги.',
+        options: [
+          { text: 'Поскаржитися на життя загалом, без деталей.', correct: false, empathyChange: -10,
+            feedback: 'Без фактів (хто, коли, де, що зробив) фахівець не зможе запустити жоден протокол захисту.' },
+          { text: 'Чітко розповісти хронологію: хто, коли, де і що саме зробив.', correct: true, empathyChange: 15, factValue: 1,
+            feedback: 'Хронологія та факти = основа для офіційного звернення й плану безпеки.' }
+        ]
+      },
+      {
+        image: 'teacher.png', happyImage: null, name: 'Юристка',
+        x: 760, y: 725,
+        situation: 'Юристка пояснює права. Ти хочеш, щоб кривдника покарали «просто зараз».',
+        options: [
+          { text: 'Вимагати негайно посадити кривдника у в’язницю.', correct: false, empathyChange: -10,
+            feedback: 'Емоційна вимога без заяви не запускає процедуру: справа не відкриється, а час буде втрачено.' },
+          { text: 'Запитати про свої права згідно із Законом України та подати офіційну заяву.', correct: true, empathyChange: 15, factValue: 1,
+            feedback: 'Офіційна заява + знання своїх прав (ЗУ «Про протидію булінгу», КУпАП/ККУ) = реальний юридичний механізм.' }
+        ]
+      }
+    ]
+  },
+  {
+    id: 8,
+    title: 'Центр допомоги',
+    topic: 'Фінал: спільнота',
+    emoji: '🤝',
+    bgImage: 'support_center.png',
+    conclusion: 'Кожен може стати свідком-захисником. Твій голос має вирішальне значення.',
+    artifact: {
+      image: null, emoji: '🤝', label: 'Значок «Свідок-Захисник»',
+      x: 520, y: 540, factValue: 1,
+      text: 'Ти отримуєш символічний значок «Свідок-Захисник». Ти пройшов довгий шлях.'
+    },
+    characters: [
+      {
+        image: 'anya_happy.png', happyImage: null, name: 'Аня, Максим і Оля',
+        x: 300, y: 725,
+        situation: 'Усі, кому ти допоміг/ла, зібралися разом. Вони дивляться на тебе з вдячністю.',
+        options: [
+          { text: 'Сказати: «Я втомився, це було надто складно».', correct: false, empathyChange: -10,
+            feedback: 'Вигорання помічника — реальне, але зараз це звучить як знецінення спільної перемоги.' },
+          { text: 'Сказати: «Разом ми змогли це зупинити. Ваша безпека варта зусиль».', correct: true, empathyChange: 20, factValue: 1,
+            feedback: 'Визнання спільного результату зміцнює і жертв, і тебе: допомога — це командна робота.' }
+        ]
+      },
+      {
+        image: 'marina_brave.png', happyImage: null, name: 'Волонтерка центру',
+        x: 760, y: 725,
+        situation: 'Волонтерка центру дякує тобі за небайдужість і пропонує залишитися у спільноті.',
+        options: [
+          { text: 'Запитати: «А чи точно поліція щось зробить?»', correct: false, empathyChange: -10,
+            feedback: 'Скепсис без дії зупиняє зміни: система працює тоді, коли громадяни наполегливо до неї звертаються.' },
+          { text: 'Запитати: «Як я можу волонтерити тут, щоб допомагати іншим?»', correct: true, empathyChange: 20, factValue: 1,
+            feedback: 'Волонтерство перетворює особистий досвід на ресурс для сотень інших дітей.' }
+        ]
+      }
+    ]
+  }
+];
+
+/* Місця, де шукаємо ассети (згідно з ТЗ). Фонового файлу .png може не бути —
+   тоді пробуємо .jpg, а далі — кольоровий прямокутник-плейсхолдер. */
+const ASSET_PATHS = {
+  backgrounds: 'assets/images/backgrounds/',
+  characters: 'assets/images/characters/',
+  objects: 'assets/images/objects/'
+};
+
+/* ============================================================================
+ * 2. СТАН ГРИ (localStorage, захищено try-catch)
+ * ==========================================================================*/
+const SAVE_KEY = 'holos_16_days_progress_v1';
+
+const GameState = {
+  data: null,
+  defaults() {
+    return {
+      unlockedLevel: 1,          // найвищий доступний рівень
+      empathy: 50,               // шкала емпатії 0-100
+      completed: {},             // { levelId: true }
+      artifacts: {},             // { levelId: true } — зібрані артефакти
+      facts: {},                 // { levelId: n } — фактiв у поточному проходженні
+      muted: false
+    };
+  },
+  load() {
+    let d = this.defaults();
+    try {
+      const raw = window.localStorage.getItem(SAVE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          d = Object.assign(d, parsed);
+          d.completed = parsed.completed || {};
+          d.artifacts = parsed.artifacts || {};
+          d.facts = parsed.facts || {};
+        }
+      }
+    } catch (e) { /* приватний режим / заблоковане сховище — граємо без збережень */ }
+    d.empathy = Math.max(0, Math.min(100, Number(d.empathy) || 0));
+    this.data = d;
+    return d;
+  },
+  save() {
+    try { window.localStorage.setItem(SAVE_KEY, JSON.stringify(this.data)); } catch (e) {}
+  },
+  reset() {
+    try { window.localStorage.removeItem(SAVE_KEY); } catch (e) {}
+    this.data = this.defaults();
+    this.save();
+  },
+  addEmpathy(delta) {
+    this.data.empathy = Math.max(0, Math.min(100, this.data.empathy + delta));
+    this.save();
+    return this.data.empathy;
+  },
+  addFact(levelId, n) {
+    this.data.facts[levelId] = (this.data.facts[levelId] || 0) + n;
+    this.save();
+    return this.data.facts[levelId];
+  },
+  completeLevel(levelId) {
+    this.data.completed[levelId] = true;
+    this.data.unlockedLevel = Math.max(this.data.unlockedLevel, Math.min(8, levelId + 1));
+    this.save();
+  }
+};
+GameState.load();
+
+/* ============================================================================
+ * 3. ЗВУК (WebAudio, без зовнішніх файлів)
+ * ==========================================================================*/
+const SoundKit = {
+  ctx: null,
+  ensure() {
+    if (!this.ctx) {
+      try {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) this.ctx = new AC();
+      } catch (e) { this.ctx = null; }
+    }
+    if (this.ctx && this.ctx.state === 'suspended') { this.ctx.resume().catch(function () {}); }
+  },
+  tone(freq, dur, type, vol, delay) {
+    if (GameState.data.muted) return;
+    this.ensure();
+    if (!this.ctx) return;
+    try {
+      const t0 = this.ctx.currentTime + (delay || 0);
+      const o = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      o.type = type || 'sine';
+      o.frequency.setValueAtTime(freq, t0);
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(vol || 0.15, t0 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      o.connect(g); g.connect(this.ctx.destination);
+      o.start(t0); o.stop(t0 + dur + 0.05);
+    } catch (e) {}
+  },
+  click()  { this.tone(520, 0.08, 'triangle', 0.10); },
+  pick()   { this.tone(660, 0.10, 'triangle', 0.12); this.tone(990, 0.14, 'triangle', 0.10, 0.09); },
+  good()   { this.tone(523, 0.12, 'sine', 0.14); this.tone(659, 0.12, 'sine', 0.14, 0.10); this.tone(784, 0.22, 'sine', 0.14, 0.20); },
+  bad()    { this.tone(196, 0.22, 'sawtooth', 0.08); this.tone(147, 0.30, 'sawtooth', 0.08, 0.12); },
+  win()    { [523, 659, 784, 1046].forEach((f, i) => this.tone(f, 0.25, 'triangle', 0.13, i * 0.13)); }
+};
+
+/* ============================================================================
+ * 4. UI-КІТ (чистий Phaser, без DOM — надійно у file:// та iframe)
+ * ==========================================================================*/
+const FONT = "'Trebuchet MS','Segoe UI',system-ui,sans-serif";
+const COLORS = {
+  bgDark: 0x0a0e1a, panel: 0x141b30, panelLine: 0x2b3a5e,
+  accent: 0xff6b35, green: 0x4ade80, red: 0xff6b6b,
+  text: 0xeaf2ff, textDim: 0x9fb0cc
+};
+
+function roundRect(g, x, y, w, h, r, fill, fillAlpha, stroke, strokeW) {
+  r = Math.max(0, Math.min(r, w / 2, h / 2));
+  if (w <= 0 || h <= 0) return;
+  if (fill !== null && fill !== undefined) { g.fillStyle(fill, fillAlpha === undefined ? 1 : fillAlpha); g.fillRoundedRect(x, y, w, h, r); }
+  if (stroke !== null && stroke !== undefined) { g.lineStyle(strokeW || 2, stroke, 1); g.strokeRoundedRect(x, y, w, h, r); }
+}
+
+/* Повне видалення інтерактивного об'єкта з черги hit-test'у Phaser.
+   Запобігає «привидам» знищених діалогових вікон, які ковтають кліки. */
+function killInteractive(scene, o) {
+  if (!scene || !o) return;
+  const targets = [o, o.zone].filter(t => t && t.input);
+  for (const t of targets) {
+    try {
+      const list = scene.input._list;
+      const i = list ? list.indexOf(t) : -1;
+      if (i > -1) list.splice(i, 1);
+      if (scene.input.clear) scene.input.clear(t, true);
+      t.disableInteractive && t.disableInteractive();
+    } catch (e) {}
+  }
+}
+
+/** Кнопка: контейнер graphics+text з hover/press-ефектами. */
+function makeButton(scene, x, y, w, h, label, opts) {
+  opts = opts || {};
+  const fill = opts.fill !== undefined ? opts.fill : 0x1b2440;
+  const fillHover = opts.fillHover !== undefined ? opts.fillHover : 0x27345c;
+  const stroke = opts.stroke !== undefined ? opts.stroke : COLORS.green;
+  const fontSize = opts.fontSize || 20;
+  const color = opts.color || '#eaf2ff';
+  const radius = opts.radius !== undefined ? opts.radius : 12;
+
+  const c = scene.add.container(x, y);
+  const g = scene.add.graphics();
+  const t = scene.add.text(0, 0, label, {
+    fontFamily: FONT, fontSize: fontSize, color: color,
+    align: 'center', wordWrap: { width: w - 26 }, lineSpacing: 4
+  }).setOrigin(0.5, 0.5);
+  c.add([g, t]);
+
+  function paint(f) {
+    g.clear();
+    roundRect(g, -w / 2, -h / 2, w, h, radius, f, 0.96, stroke, 2);
+  }
+  paint(fill);
+  // Невидима інтерактивна зона-нащадок: надійний hit-test всередині контейнера
+  const zone = scene.add.zone(0, 0, w, h).setInteractive();
+  c.add(zone);
+  c.zone = zone;
+
+  zone.on('pointerover', function () { if (zone.input.enabled) { paint(fillHover); scene.game.canvas.style.cursor = 'pointer'; } });
+  zone.on('pointerout', function () { paint(fill); scene.game.canvas.style.cursor = 'default'; });
+  zone.on('pointerdown', function () { if (zone.input.enabled) { c.setScale(0.97); SoundKit.click(); } });
+  zone.on('pointerup', function () {
+    c.setScale(1);
+    if (zone.input.enabled && opts.onClick) opts.onClick();
+  });
+  zone.on('pointerupoutside', function () { c.setScale(1); });
+  c.paint = paint; c.labelText = t; c.setFill = function (f) { fill = f; paint(f); };
+  c.setLocked = function (locked) {
+    if (locked) { zone.disableInteractive(); c.setAlpha(0.55); }
+    else { zone.setInteractive(); c.setAlpha(1); }
+  };
+  return c;
+}
+
+/* ============================================================================
+ * 5. BOOT-СЦЕНА: завантаження ассетів + плейсхолдери
+ * ==========================================================================*/
+class BootScene extends Phaser.Scene {
+  constructor() { super('Boot'); }
+
+  preload() {
+    // Індикатор завантаження
+    const bar = this.add.graphics();
+    const label = this.add.text(512, 350, 'Завантаження гри…', { fontFamily: FONT, fontSize: 26, color: '#9fb0cc' }).setOrigin(0.5);
+    this.load.on('progress', function (p) {
+      bar.clear();
+      roundRect(bar, 312, 392, 400, 18, 9, 0x1b2440, 1, COLORS.panelLine, 2);
+      if (p > 0.01) roundRect(bar, 314, 394, 396 * p, 14, 7, COLORS.accent, 1);
+    });
+    this.load.on('complete', function () { bar.clear(); label.destroy(); });
+
+    this.failed = {};
+    this.load.on('loaderror', (fileObj) => { this.failed[fileObj.key] = true; });
+
+    // Фони: спершу .png (як у ТЗ), потім .jpg (оптимізована версія)
+    const bgNames = ['school_yard', 'classroom', 'home', 'phone_digital', 'mall', 'gym', 'psychologist', 'support_center'];
+    bgNames.forEach(function (n) {
+      this.load.image('bg_' + n + '_png', ASSET_PATHS.backgrounds + n + '.png');
+      this.load.image('bg_' + n + '_jpg', ASSET_PATHS.backgrounds + n + '.jpg');
+    }, this);
+
+    // Персонажі
+    ['anya', 'anya_happy', 'oleg', 'marina', 'marina_brave', 'teacher', 'psychologist', 'player'].forEach(function (n) {
+      this.load.image('ch_' + n, ASSET_PATHS.characters + n + '.png');
+    }, this);
+
+    // Об'єкти
+    ['phone', 'books', 'bench', 'notice'].forEach(function (n) {
+      this.load.image('ob_' + n, ASSET_PATHS.objects + n + '.png');
+    }, this);
+  }
+
+  /** Кольоровий прямокутник-плейсхолдер з підписом (якщо файла немає). */
+  makePlaceholder(key, w, h, labelText, baseColor, emoji) {
+    const cv = this.textures.createCanvas(key, w, h);
+    if (!cv) return;
+    const ctx = cv.getContext();
+    const c = new Phaser.Display.Color(baseColor >> 16 & 255, baseColor >> 8 & 255, baseColor & 255);
+    const grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, 'rgba(' + c.r + ',' + c.g + ',' + c.b + ',1)');
+    grad.addColorStop(1, 'rgba(' + Math.max(0, c.r - 40) + ',' + Math.max(0, c.g - 40) + ',' + Math.max(0, c.b - 30) + ',1)');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 4;
+    ctx.setLineDash([14, 10]); ctx.strokeRect(8, 8, w - 16, h - 16); ctx.setLineDash([]);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    if (emoji) { ctx.font = Math.round(Math.min(w, h) * 0.34) + 'px serif'; ctx.fillText(emoji, w / 2, h / 2 - Math.min(w, h) * 0.12); }
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.font = 'bold ' + Math.max(14, Math.round(Math.min(w, h) * 0.085)) + 'px sans-serif';
+    ctx.fillText(labelText, w / 2, h / 2 + (emoji ? Math.min(w, h) * 0.16 : 0));
+    cv.refresh();
+  }
+
+  create() {
+    const failed = this.failed;
+
+    // Фони: вибираємо png → jpg → плейсхолдер
+    const bgMeta = {
+      school_yard: ['[Фон: Школа]', 0x33507a, '🏫'], classroom: ['[Фон: Клас]', 0x2e5a4e, '💻'],
+      home: ['[Фон: Дім]', 0x5a4632, '🏠'], phone_digital: ['[Фон: Цифровий простір]', 0x3a2a63, '📱'],
+      mall: ['[Фон: ТЦ]', 0x4a4a5e, '🏪'], gym: ['[Фон: Спортзал]', 0x5e4a2a, '⚽'],
+      psychologist: ['[Фон: Кабінет психолога]', 0x4a3355, '🏛️'], support_center: ['[Фон: Центр допомоги]', 0x2a5e52, '🤝']
+    };
+    for (const n in bgMeta) {
+      // Плейсхолдер створюється лише якщо НЕМАЄ ні .png, ні .jpg
+      const hasPng = this.textures.exists('bg_' + n + '_png') && !failed['bg_' + n + '_png'];
+      const hasJpg = this.textures.exists('bg_' + n + '_jpg') && !failed['bg_' + n + '_jpg'];
+      if (!hasPng && !hasJpg) {
+        this.makePlaceholder('bg_' + n, 1024, 768, bgMeta[n][0], bgMeta[n][1], bgMeta[n][2]);
+      }
+    }
+
+    // Персонажі
+    const chMeta = {
+      anya: ['[Аня]', 0x4a6fa5], anya_happy: ['[Аня щаслива]', 0x4a9a6a], oleg: ['[Олег]', 0x7a4a4a],
+      marina: ['[Марина]', 0x6a7a4a], marina_brave: ['[Марина смілива]', 0x4a8a8a],
+      teacher: ['[Дорослий]', 0x7a6a4a], psychologist: ['[Психолог]', 0x6a4a7a], player: ['[Герой]', 0x4a5a7a]
+    };
+    for (const n in chMeta) {
+      if (!this.textures.exists('ch_' + n) || failed['ch_' + n]) {
+        this.makePlaceholder('ch_' + n, 200, 400, chMeta[n][0], chMeta[n][1], '🧍');
+      }
+    }
+
+    // Об'єкти
+    const obMeta = { phone: ['[Телефон]', 0x35507a, '📱'], books: ['[Книги]', 0x6a5a3a, '📚'], bench: ['[Лавка]', 0x5a4a3a, '🪑'], notice: ['[Оголошення]', 0x55607a, '📄'] };
+    for (const n in obMeta) {
+      if (!this.textures.exists('ob_' + n) || failed['ob_' + n]) {
+        this.makePlaceholder('ob_' + n, 160, 160, obMeta[n][0], obMeta[n][1], obMeta[n][2]);
+      }
+    }
+
+    this.scene.start('Menu');
+  }
+}
+
+/* ============================================================================
+ * 6. ГОЛОВНЕ МЕНЮ: сітка 4×2, скидання прогресу, довідка
+ * ==========================================================================*/
+class MenuScene extends Phaser.Scene {
+  constructor() { super('Menu'); }
+
+  create() {
+    const S = GameState.data;
+    this.cameras.main.setBackgroundColor(COLORS.bgDark);
+
+    // Декоративний градієнт
+    const deco = this.add.graphics();
+    deco.fillGradientStyle(0x0a0e1a, 0x0a0e1a, 0x14203a, 0x14203a, 1);
+    deco.fillRect(0, 0, 1024, 768);
+    deco.fillStyle(COLORS.accent, 0.07);
+    deco.fillCircle(140, 120, 190);
+    deco.fillStyle(0x4ade80, 0.05);
+    deco.fillCircle(920, 660, 230);
+
+    this.add.text(512, 62, '16 ДНІВ: ГОЛОС, ЯКИЙ ЧУТИ', {
+      fontFamily: FONT, fontSize: 44, fontStyle: 'bold', color: '#ff6b35'
+    }).setOrigin(0.5);
+    this.add.text(512, 104, 'Освітній квест про протидію насильству • оберіть рівень', {
+      fontFamily: FONT, fontSize: 20, color: '#9fb0cc'
+    }).setOrigin(0.5);
+
+    // Статистика гравця
+    const doneCount = Object.keys(S.completed).filter(k => S.completed[k]).length;
+    this.add.text(512, 140, 'Пройдено рівнів: ' + doneCount + '/8   •   💚 Емпатія: ' + S.empathy + '%', {
+      fontFamily: FONT, fontSize: 18, color: '#eaf2ff'
+    }).setOrigin(0.5);
+
+    // --- Сітка 4×2 ---
+    const cw = 214, chh = 168, gap = 22;
+    const gridW = 4 * cw + 3 * gap;
+    const x0 = (1024 - gridW) / 2 + cw / 2;
+    const y0 = 250, y1 = 250 + chh + gap;
+
+    GAME_SCRIPT.forEach((lv, i) => {
+      const col = i % 4, row = Math.floor(i / 4);
+      const x = x0 + col * (cw + gap), y = (row === 0 ? y0 : y1) + chh / 2;
+      this.buildCard(lv, x, y, cw, chh);
+    });
+
+    // --- Нижні кнопки ---
+    makeButton(this, 300, 690, 250, 56, '🔄 Скинути прогрес', {
+      stroke: COLORS.red, fill: 0x3a1b22, fillHover: 0x4d242d, fontSize: 20,
+      onClick: () => this.confirmReset()
+    });
+    makeButton(this, 560, 690, 220, 56, '❓ Як грати', {
+      stroke: COLORS.panelLine, fill: 0x1b2440, fillHover: 0x27345c, fontSize: 20,
+      onClick: () => this.showHelp()
+    });
+    makeButton(this, 790, 690, 200, 56, '📞 Лінії допомоги', {
+      stroke: COLORS.green, fill: 0x14301f, fillHover: 0x1b4029, fontSize: 19,
+      onClick: () => this.showContacts()
+    });
+
+    this.add.text(512, 748, 'Гра створена для підлітків 10–17 років • Кампанія «16 днів проти насильства»', {
+      fontFamily: FONT, fontSize: 14, color: '#6b7a99'
+    }).setOrigin(0.5);
+  }
+
+  buildCard(lv, x, y, w, h) {
+    const S = GameState.data;
+    const state = S.completed[lv.id] ? 'done' : (lv.id <= S.unlockedLevel ? 'open' : 'locked');
+    const c = this.add.container(x, y);
+    const g = this.add.graphics();
+
+    const fills = { done: [0x14301f, 0x4ade80], open: [0x241a12, 0xff6b35], locked: [0x161c2b, 0x39415a] };
+    const [fill, stroke] = fills[state];
+    const alpha = state === 'locked' ? 0.55 : 1;
+
+    g.fillStyle(fill, alpha); g.fillRoundedRect(-w / 2, -h / 2, w, h, 16);
+    g.lineStyle(2.5, stroke, alpha); g.strokeRoundedRect(-w / 2, -h / 2, w, h, 16);
+
+    const dim = state === 'locked' ? 0.5 : 1;
+    const badge = this.add.text(-w / 2 + 16, -h / 2 + 12, String(lv.id), {
+      fontFamily: FONT, fontSize: 22, fontStyle: 'bold', color: state === 'done' ? '#4ade80' : (state === 'open' ? '#ff6b35' : '#6b7a99')
+    });
+    const emoji = this.add.text(w / 2 - 20, -h / 2 + 12, state === 'locked' ? '🔒' : lv.emoji, { fontSize: 26 }).setOrigin(1, 0);
+    const title = this.add.text(0, -6, lv.title, {
+      fontFamily: FONT, fontSize: 21, fontStyle: 'bold', color: '#eaf2ff',
+      wordWrap: { width: w - 28 }, align: 'center'
+    }).setOrigin(0.5);
+    const topic = this.add.text(0, 26, lv.topic, {
+      fontFamily: FONT, fontSize: 15, color: '#9fb0cc', wordWrap: { width: w - 28 }, align: 'center'
+    }).setOrigin(0.5);
+    const status = this.add.text(0, h / 2 - 24,
+      state === 'done' ? '✅ Пройдено' : (state === 'open' ? '▶ Грати' : 'Заблоковано'), {
+      fontFamily: FONT, fontSize: 16, fontStyle: 'bold',
+      color: state === 'done' ? '#4ade80' : (state === 'open' ? '#ffb08f' : '#6b7a99')
+    }).setOrigin(0.5);
+    [badge, emoji, title, topic, status].forEach(o => o.setAlpha(dim));
+    const zone = this.add.zone(0, 0, w, h).setInteractive();
+    c.add([g, badge, emoji, title, topic, status, zone]);
+
+    if (state === 'locked') {
+      zone.on('pointerdown', () => {
+        SoundKit.bad();
+        this.tweens.add({ targets: c, x: c.x + 8, duration: 60, yoyo: true, repeat: 3, onComplete: () => c.setX(x) });
+        this.toast('🔒 Спочатку пройди рівень ' + (lv.id - 1));
+      });
+    } else {
+      zone.on('pointerover', () => { c.setScale(1.04); this.game.canvas.style.cursor = 'pointer'; });
+      zone.on('pointerout', () => { c.setScale(1); this.game.canvas.style.cursor = 'default'; });
+      zone.on('pointerdown', () => { SoundKit.click(); this.scene.start('Level', { levelId: lv.id }); });
+    }
+  }
+
+  toast(msg) {
+    if (this._toast) this._toast.destroy();
+    const t = this.add.text(512, 620, msg, {
+      fontFamily: FONT, fontSize: 20, fontStyle: 'bold', color: '#ffd7cd',
+      backgroundColor: '#2a1512', padding: { x: 18, y: 10 }
+    }).setOrigin(0.5).setDepth(900).setAlpha(0);
+    this._toast = t;
+    this.tweens.add({ targets: t, alpha: 1, duration: 150, hold: 1400, yoyo: true, onComplete: () => t.destroy() });
+  }
+
+  overlayPanel(w, h) {
+    const dim = this.add.rectangle(512, 384, 1024, 768, 0x000000, 0.6).setDepth(800).setInteractive();
+    const panel = this.add.graphics().setDepth(801);
+    roundRect(panel, 512 - w / 2, 384 - h / 2, w, h, 18, COLORS.panel, 0.98, COLORS.panelLine, 2);
+    return { dim, panel, destroy: function (scene) { dim.destroy(); panel.destroy(); } };
+  }
+
+  confirmReset() {
+    const ov = this.overlayPanel(560, 260);
+    const items = [ov.dim, ov.panel];
+    const title = this.add.text(512, 300, '🔄 Скинути весь прогрес?', { fontFamily: FONT, fontSize: 26, fontStyle: 'bold', color: '#ff6b6b' }).setOrigin(0.5).setDepth(802);
+    const sub = this.add.text(512, 345, 'Рівні, емпатія та артефакти буде видалено.', { fontFamily: FONT, fontSize: 18, color: '#9fb0cc' }).setOrigin(0.5).setDepth(802);
+    const yes = makeButton(this, 400, 430, 200, 54, 'Так, скинути', {
+      stroke: COLORS.red, fill: 0x3a1b22, fillHover: 0x4d242d, fontSize: 19,
+      onClick: () => { GameState.reset(); items.concat([title, sub, yes, no]).forEach(o => { killInteractive(this, o); o.destroy(); }); this.scene.restart(); }
+    }).setDepth(802);
+    const no = makeButton(this, 624, 430, 200, 54, 'Скасувати', {
+      stroke: COLORS.panelLine, fill: 0x1b2440, fillHover: 0x27345c, fontSize: 19,
+      onClick: () => { items.concat([title, sub, yes, no]).forEach(o => { killInteractive(this, o); o.destroy(); }); }
+    }).setDepth(802);
+    items.push(title, sub);
+  }
+
+  showHelp() {
+    const ov = this.overlayPanel(760, 470);
+    const items = [ov.dim, ov.panel];
+    const lines = [
+      ['❓ Як грати', 26, '#ff6b35', 'bold'],
+      ['• Клацай на персонажів, щоб побачити ситуацію та обрати дію.', 19, '#eaf2ff', 'normal'],
+      ['• Правильна дія: +15% емпатії та +1 факт. Неправильна: −10% емпатії.', 19, '#eaf2ff', 'normal'],
+      ['• Клацай на предмет, що пульсує, — це артефакт-доказ (+1 факт).', 19, '#eaf2ff', 'normal'],
+      ['• Зібравши 3/3 фактів, ти завершуєш рівень і відкриваєш наступний.', 19, '#eaf2ff', 'normal'],
+      ['• Прогрес зберігається у цьому браузері автоматично.', 19, '#eaf2ff', 'normal'],
+      ['Пам’ятай: насильство процвітає там, де свідки мовчать.', 19, '#4ade80', 'bold']
+    ];
+    let y = 384 - 190;
+    lines.forEach(function (L) {
+      const t = this.add.text(512, y, L[0], { fontFamily: FONT, fontSize: L[1], fontStyle: L[3], color: L[2], wordWrap: { width: 680 }, align: 'center', lineSpacing: 4 }).setOrigin(0.5, 0).setDepth(802);
+      items.push(t);
+      y += t.height + 14;
+    }, this);
+    const close = makeButton(this, 512, 384 + 190, 200, 50, 'Зрозуміло', {
+      stroke: COLORS.green, fill: 0x14301f, fillHover: 0x1b4029, fontSize: 19,
+      onClick: () => items.concat([close]).forEach(o => { killInteractive(this, o); o.destroy(); })
+    }).setDepth(802);
+  }
+
+  showContacts() {
+    const ov = this.overlayPanel(700, 430);
+    const items = [ov.dim, ov.panel];
+    const head = this.add.text(512, 230, '📞 КОНТАКТИ ДОПОМОГИ (Україна)', { fontFamily: FONT, fontSize: 26, fontStyle: 'bold', color: '#4ade80' }).setOrigin(0.5).setDepth(802);
+    const body = this.add.text(512, 280, [
+      'Дитяча гаряча лінія: 0 800 500 225 (безкоштовно)',
+      'Ла Страда (протидія насильству): 0 800 500 335',
+      'Поліція: 102   |   Швидка: 103',
+      '',
+      'Якщо тобі або комусь поруч загрожує небезпека —',
+      'телефонуй негайно. Це не «донос», це порятунок.'
+    ].join('\n'), { fontFamily: FONT, fontSize: 21, color: '#eaf2ff', align: 'center', lineSpacing: 8 }).setOrigin(0.5, 0).setDepth(802);
+    const close = makeButton(this, 512, 545, 200, 50, 'Закрити', {
+      stroke: COLORS.green, fill: 0x14301f, fillHover: 0x1b4029, fontSize: 19,
+      onClick: () => items.concat([head, body, close]).forEach(o => { killInteractive(this, o); o.destroy(); })
+    }).setDepth(802);
+    items.push(head, body);
+  }
+}
+
+/* ============================================================================
+ * 7. СЦЕНА РІВНЯ
+ * ==========================================================================*/
+class LevelScene extends Phaser.Scene {
+  constructor() { super('Level'); }
+
+  init(data) {
+    this.levelId = (data && data.levelId) || 1;
+    this.level = GAME_SCRIPT.find(l => l.id === this.levelId) || GAME_SCRIPT[0];
+  }
+
+  create() {
+    const S = GameState.data;
+    S.facts[this.levelId] = 0;           // факти поточного проходження
+    GameState.save();
+    this.facts = 0;
+    this.locked = false;
+    this.resolvedChars = {};
+    this.artifactTaken = false;
+
+    this.cameras.main.setBackgroundColor(COLORS.bgDark);
+
+    // --- Фон (png → jpg → плейсхолдер) ---
+    const bgBase = this.level.bgImage.replace(/\.png$/, '');
+    let bgKey = 'bg_' + bgBase;
+    if (!this.textures.exists(bgKey)) {
+      if (this.textures.exists(bgKey + '_png')) bgKey = bgKey + '_png';
+      else if (this.textures.exists(bgKey + '_jpg')) bgKey = bgKey + '_jpg';
+    }
+    this.add.image(512, 384, bgKey).setDepth(0);
+    const shade = this.add.rectangle(512, 384, 1024, 768, 0x000000, 0.18).setDepth(1);
+
+    // --- Верхня панель UI ---
+    this.buildHUD();
+
+    // --- Артефакт ---
+    this.buildArtifact();
+
+    // --- Персонажі ---
+    this.charObjects = this.level.characters.map((ch, idx) => this.buildCharacter(ch, idx));
+
+    // Підказка на старті
+    this.toast('🔎 Знайди доказ і поговори з персонажами: збери 3 факти');
+  }
+
+  /* ---------- HUD ---------- */
+  buildHUD() {
+    const hud = this.add.graphics().setDepth(500);
+    hud.fillStyle(0x0a0e1a, 0.86); hud.fillRect(0, 0, 1024, 56);
+    hud.fillStyle(COLORS.accent, 1); hud.fillRect(0, 56, 1024, 2);
+
+    this.add.text(16, 28, 'Рівень ' + this.level.id + ' · ' + this.level.title + ' — ' + this.level.topic, {
+      fontFamily: FONT, fontSize: 19, fontStyle: 'bold', color: '#ffd7cd'
+    }).setOrigin(0, 0.5).setDepth(501);
+
+    this.factsText = this.add.text(470, 28, '📋 Факти: 0/3', {
+      fontFamily: FONT, fontSize: 19, fontStyle: 'bold', color: '#eaf2ff'
+    }).setOrigin(0, 0.5).setDepth(501);
+
+    this.empText = this.add.text(640, 28, '💚 Емпатія: ' + GameState.data.empathy + '%', {
+      fontFamily: FONT, fontSize: 19, fontStyle: 'bold', color: '#4ade80'
+    }).setOrigin(0, 0.5).setDepth(501);
+
+    this.empBar = this.add.graphics().setDepth(501);
+    this.drawEmpathyBar();
+
+    const muteBtn = makeButton(this, 872, 28, 44, 40, GameState.data.muted ? '🔇' : '🔊', {
+      stroke: COLORS.panelLine, fill: 0x1b2440, fillHover: 0x27345c, fontSize: 18, radius: 10,
+      onClick: () => {
+        GameState.data.muted = !GameState.data.muted; GameState.save();
+        muteBtn.labelText.setText(GameState.data.muted ? '🔇' : '🔊');
+      }
+    }).setDepth(501);
+
+    makeButton(this, 958, 28, 110, 40, '☰ Меню', {
+      stroke: COLORS.panelLine, fill: 0x1b2440, fillHover: 0x27345c, fontSize: 17, radius: 10,
+      onClick: () => this.scene.start('Menu')
+    }).setDepth(501);
+  }
+
+  drawEmpathyBar() {
+    const g = this.empBar;
+    g.clear();
+    const x = 640, y = 44, w = 150, h = 6;
+    g.fillStyle(0x2b3a5e, 1); g.fillRect(x, y, w, h);
+    const p = GameState.data.empathy / 100;
+    g.fillStyle(GameState.data.empathy >= 50 ? 0x4ade80 : 0xff6b35, 1);
+    g.fillRect(x, y, w * p, h);
+  }
+
+  refreshHUD(delta) {
+    this.factsText.setText('📋 Факти: ' + this.facts + '/3');
+    this.empText.setText('💚 Емпатія: ' + GameState.data.empathy + '%');
+    this.drawEmpathyBar();
+    if (delta) {
+      const fl = this.add.text(720, 70, (delta > 0 ? '+' : '') + delta + '%', {
+        fontFamily: FONT, fontSize: 26, fontStyle: 'bold', color: delta > 0 ? '#4ade80' : '#ff6b6b'
+      }).setOrigin(0.5).setDepth(600);
+      this.tweens.add({ targets: fl, y: fl.y - 46, alpha: 0, duration: 900, onComplete: () => fl.destroy() });
+    }
+    // pulse facts counter
+    this.tweens.add({ targets: this.factsText, scale: 1.25, duration: 110, yoyo: true });
+  }
+
+  toast(msg) {
+    const t = this.add.text(512, 92, msg, {
+      fontFamily: FONT, fontSize: 19, fontStyle: 'bold', color: '#0a0e1a',
+      backgroundColor: '#ffd7cd', padding: { x: 16, y: 8 }
+    }).setOrigin(0.5).setDepth(520).setAlpha(0);
+    this.tweens.add({ targets: t, alpha: 1, duration: 200, hold: 2200, yoyo: true, onComplete: () => t.destroy() });
+  }
+
+  /* ---------- Артефакт ---------- */
+  buildArtifact() {
+    const a = this.level.artifact;
+    const cont = this.add.container(a.x, a.y).setDepth(100);
+
+    // Сяйво під предметом
+    const glow = this.add.graphics();
+    glow.fillStyle(COLORS.accent, 0.35);
+    glow.fillCircle(0, 0, 58);
+    glow.fillStyle(0xffd7cd, 0.25);
+    glow.fillCircle(0, 0, 36);
+    cont.add(glow);
+
+    let sprite = null;
+    if (a.image && this.textures.exists('ob_' + a.image.replace(/\.png$/, ''))) {
+      sprite = this.add.image(0, 0, 'ob_' + a.image.replace(/\.png$/, ''));
+      const sc = Math.min(150 / sprite.width, 150 / sprite.height);
+      sprite.setScale(sc);
+      cont.add(sprite);
+    } else {
+      sprite = this.add.text(0, 0, a.emoji || '✨', { fontSize: 74 }).setOrigin(0.5);
+      cont.add(sprite);
+    }
+
+    const label = this.add.text(0, 84, '🔎 ' + a.label, {
+      fontFamily: FONT, fontSize: 16, fontStyle: 'bold', color: '#ffe9dd',
+      backgroundColor: '#0a0e1acc', padding: { x: 8, y: 4 }
+    }).setOrigin(0.5);
+    cont.add(label);
+
+    const zone = this.add.zone(0, 0, 160, 180).setInteractive();
+    cont.add(zone);
+
+    // Пульсація
+    this.tweens.add({ targets: glow, scaleX: 1.25, scaleY: 1.25, alpha: 0.55, duration: 700, yoyo: true, repeat: -1 });
+    this.tweens.add({ targets: sprite, y: sprite.y - 6, duration: 900, yoyo: true, repeat: -1 });
+
+    zone.on('pointerover', () => { if (!this.artifactTaken) this.game.canvas.style.cursor = 'pointer'; });
+    zone.on('pointerout', () => { this.game.canvas.style.cursor = 'default'; });
+    zone.on('pointerdown', () => {
+      if (this.locked || this.artifactTaken) return;
+      SoundKit.pick();
+      this.openDialog({
+        title: '🔎 Знахідка: ' + a.label,
+        body: a.text,
+        bodyColor: '#ffe9dd',
+        singleAction: {
+          label: '📋 Зафіксувати факт (+1)',
+          onClick: () => {
+            this.artifactTaken = true;
+            GameState.data.artifacts[this.levelId] = true; GameState.save();
+            this.facts = GameState.addFact(this.levelId, a.factValue || 1);
+            // Предмет стає сірим і неактивним
+            this.tweens.killTweensOf(glow); this.tweens.killTweensOf(sprite);
+            glow.setVisible(false);
+            [sprite, label].forEach(o => { if (o.setTint) o.setTint(0x8a8a8a); if (o.setAlpha) o.setAlpha(0.5); });
+            label.setText('✔ ' + a.label);
+            zone.disableInteractive();
+            this.refreshHUD();
+            this.checkComplete();
+          }
+        }
+      });
+    });
+    this.artifactCont = cont;
+  }
+
+  /* ---------- Персонажі ---------- */
+  buildCharacter(ch, idx) {
+    const obj = { data: ch, resolved: false };
+    const key = 'ch_' + ch.image.replace(/\.png$/, '');
+    const cont = this.add.container(ch.x, ch.y).setDepth(50 + idx);
+
+    const sprite = this.add.image(0, 0, key).setOrigin(0.5, 1);
+    const targetH = 380;
+    sprite.setScale(targetH / sprite.height);
+    cont.add(sprite);
+    obj.sprite = sprite;
+
+    // Ім'я
+    const name = this.add.text(0, -targetH - 26, ch.name, {
+      fontFamily: FONT, fontSize: 18, fontStyle: 'bold', color: '#0a0e1a',
+      backgroundColor: '#ffd7cd', padding: { x: 10, y: 5 }
+    }).setOrigin(0.5);
+    cont.add(name);
+
+    // Індикатор «є діалог»
+    const mark = this.add.text(0, -targetH - 66, '💬', { fontSize: 30 }).setOrigin(0.5);
+    cont.add(mark);
+    this.tweens.add({ targets: mark, y: mark.y - 8, duration: 800, yoyo: true, repeat: -1 });
+    obj.mark = mark;
+
+    const w = 190, h = targetH + 40;
+    const zone = this.add.zone(0, -h / 2, w, h).setInteractive();
+    cont.add(zone);
+    obj.zone = zone;
+    zone.on('pointerover', () => { if (!this.locked) this.game.canvas.style.cursor = 'pointer'; });
+    zone.on('pointerout', () => { this.game.canvas.style.cursor = 'default'; });
+    zone.on('pointerdown', () => {
+      if (this.locked) return;
+      SoundKit.click();
+      this.openCharDialog(obj);
+    });
+    obj.cont = cont;
+    return obj;
+  }
+
+  openCharDialog(obj) {
+    const ch = obj.data;
+    if (obj.resolved) {
+      this.openDialog({
+        title: ch.name,
+        body: ch.situation + '\n\n✅ Ти вже обрав/ла правильну дію. Ця людина у безпеці завдяки тобі.',
+        bodyColor: '#eaf2ff',
+        singleAction: { label: 'Добре', onClick: function () {} }
+      });
+      return;
+    }
+    this.openDialog({
+      title: ch.name,
+      body: ch.situation,
+      bodyColor: '#eaf2ff',
+      options: ch.options.map((op, i) => ({
+        label: op.text,
+        onClick: () => this.applyChoice(obj, op, i)
+      }))
+    });
+  }
+
+  applyChoice(obj, op, idx) {
+    const dlg = this.activeDialog;
+    const newEmp = GameState.addEmpathy(op.empathyChange || 0);
+    let factMsg = '';
+    if (op.correct) {
+      SoundKit.good();
+      this.facts = GameState.addFact(this.levelId, op.factValue || 1);
+      factMsg = ' 📋 +1 факт.';
+      obj.resolved = true;
+      // Зміна спрайту на «щасливу» версію
+      const ch = obj.data;
+      if (ch.happyImage && this.textures.exists('ch_' + ch.happyImage.replace(/\.png$/, ''))) {
+        const old = obj.sprite;
+        const nk = 'ch_' + ch.happyImage.replace(/\.png$/, '');
+        const ns = this.add.image(0, 0, nk).setOrigin(0.5, 1).setScale(old.scaleX).setAlpha(0).setDepth(old.depth);
+        obj.cont.addAt(ns, 1);
+        this.tweens.add({ targets: ns, alpha: 1, duration: 500, onComplete: () => old.destroy() });
+        obj.sprite = ns;
+      }
+      // Зелена позначка
+      obj.mark.setText('✅');
+      this.tweens.killTweensOf(obj.mark);
+      this.tweens.add({ targets: obj.cont, y: obj.cont.y - 10, duration: 120, yoyo: true });
+    } else {
+      SoundKit.bad();
+      this.tweens.add({ targets: obj.cont, angle: 2, duration: 60, yoyo: true, repeat: 3, onComplete: () => obj.cont.setAngle(0) });
+    }
+    this.refreshHUD(op.empathyChange || 0);
+    dlg.showFeedback(op, factMsg, newEmp);
+    this.checkComplete();
+  }
+
+  /* ---------- Діалогове вікно ---------- */
+  openDialog(cfg) {
+    this.closeDialog();
+    const W = 860, H = 480;
+    const cont = this.add.container(512, 400).setDepth(900);
+
+    const dim = this.add.rectangle(0, 0, 1024, 768, 0x000000, 0).setInteractive();
+    const panel = this.add.graphics();
+    roundRect(panel, -W / 2, -H / 2, W, H, 20, COLORS.panel, 0.985, COLORS.panelLine, 2.5);
+    const title = this.add.text(0, -H / 2 + 44, cfg.title, {
+      fontFamily: FONT, fontSize: 27, fontStyle: 'bold', color: '#ff6b35', wordWrap: { width: W - 90 }
+    }).setOrigin(0.5);
+    const line = this.add.graphics();
+    line.fillStyle(COLORS.panelLine, 1); line.fillRect(-W / 2 + 30, -H / 2 + 74, W - 60, 2);
+    const body = this.add.text(0, -H / 2 + 96, cfg.body, {
+      fontFamily: FONT, fontSize: 20, color: cfg.bodyColor || '#eaf2ff',
+      wordWrap: { width: W - 100 }, align: 'center', lineSpacing: 6
+    }).setOrigin(0.5, 0);
+
+    cont.add([dim, panel, title, line, body]);
+    this.tweens.add({ targets: dim, fillAlpha: 0.62, duration: 180 });
+    cont.setScale(0.92); cont.setAlpha(0);
+    this.tweens.add({ targets: cont, scale: 1, alpha: 1, duration: 180, ease: 'Back.easeOut' });
+
+    const self = this;
+    const dialog = { cont: cont, items: [dim, panel, title, line, body] };
+
+    const closeAll = function () {
+      if (closeAll.done) return;
+      closeAll.done = true;
+      dialog.items.forEach(o => killInteractive(self, o));
+      self.tweens.add({
+        targets: cont, alpha: 0, scale: 0.95, duration: 140,
+        onComplete: () => cont.destroy(true)
+      });
+      self.activeDialog = null;
+    };
+    dialog.close = closeAll;
+
+    // Хрестик закриття
+    const xBtn = makeButton(this, W / 2 - 34, -H / 2 + 34, 40, 40, '✕', {
+      stroke: COLORS.panelLine, fill: 0x2a1b22, fillHover: 0x3d242d, fontSize: 18, radius: 10,
+      onClick: closeAll
+    });
+    cont.add(xBtn); dialog.items.push(xBtn);
+
+    if (cfg.singleAction) {
+      const b = makeButton(this, 0, H / 2 - 56, 420, 58, cfg.singleAction.label, {
+        stroke: COLORS.green, fill: 0x14301f, fillHover: 0x1b4029, fontSize: 20,
+        onClick: function () { cfg.singleAction.onClick(); closeAll(); }
+      });
+      cont.add(b); dialog.items.push(b);
+    } else if (cfg.options) {
+      const opts = [];
+      cfg.options.forEach(function (op, i) {
+        const b = makeButton(self, 0, H / 2 - 150 + i * 74, W - 120, 64, op.label, {
+          stroke: COLORS.panelLine, fill: 0x1b2440, fillHover: 0x27345c, fontSize: 19,
+          onClick: function () { op.onClick(); }
+        });
+        cont.add(b); opts.push(b); dialog.items.push(b);
+      });
+      // Область фідбеку + кнопка «Далі» (з'являються після вибору)
+      const fb = this.add.text(0, H / 2 - 150, '', {
+        fontFamily: FONT, fontSize: 19, color: '#eaf2ff', wordWrap: { width: W - 120 }, align: 'center', lineSpacing: 5
+      }).setOrigin(0.5, 0).setVisible(false);
+      const next = makeButton(this, 0, H / 2 - 46, 260, 52, 'Далі ➡', {
+        stroke: COLORS.green, fill: 0x14301f, fillHover: 0x1b4029, fontSize: 20,
+        onClick: closeAll
+      }).setVisible(false);
+      cont.add([fb, next]); dialog.items.push(fb, next);
+
+      dialog.showFeedback = function (op, factMsg, newEmp) {
+        opts.forEach(o => { o.setLocked(true); o.setVisible(false); });
+        const good = op.correct;
+        fb.setText((good ? '✅ ПРАВИЛЬНО. ' : '❌ ПОМИЛКА. ') + op.feedback +
+          '\nЕмпатія: ' + (op.empathyChange > 0 ? '+' : '') + op.empathyChange + '% (стало ' + newEmp + '%).' + factMsg);
+        fb.setColor(good ? '#4ade80' : '#ff6b6b');
+        fb.setVisible(true);
+        next.setVisible(true);
+        // підганяємо кнопку «Далі» під низ фідбеку
+        next.setY(Math.min(H / 2 - 46, fb.y + fb.height + 34));
+      };
+    }
+
+    this.activeDialog = dialog;
+    return dialog;
+  }
+
+  closeDialog() {
+    if (this.activeDialog) { const d = this.activeDialog; this.activeDialog = null; d.cont.destroy(true); }
+  }
+
+  /* ---------- Завершення рівня ---------- */
+  checkComplete() {
+    if (this.facts >= 3 && !this.completionShown) {
+      this.completionShown = true;
+      this.locked = true;
+      this.game.canvas.style.cursor = 'default';
+      // Затримка через tween-лічильник (надійніше за scene timers у всіх середовищах)
+      this.tweens.addCounter({
+        from: 0, to: 1, duration: 700,
+        onComplete: () => { if (this.scene.isActive()) this.showCompletion(); }
+      });
+    }
+  }
+
+  showCompletion() {
+    SoundKit.win();
+    GameState.completeLevel(this.levelId);
+    const isLast = this.levelId >= GAME_SCRIPT.length;
+
+    const dim = this.add.rectangle(512, 384, 1024, 768, 0x000000, 0).setDepth(950).setInteractive();
+    this.tweens.add({ targets: dim, fillAlpha: 0.82, duration: 500 });
+
+    const W = 760, H = 400;
+    const cont = this.add.container(512, 384).setDepth(960).setAlpha(0);
+    const panel = this.add.graphics();
+    roundRect(panel, -W / 2, -H / 2, W, H, 22, COLORS.panel, 0.99, COLORS.accent, 3);
+    const title = this.add.text(0, -H / 2 + 56, '🏅 РІВЕНЬ ЗАВЕРШЕНО!', {
+      fontFamily: FONT, fontSize: 36, fontStyle: 'bold', color: '#ff6b35'
+    }).setOrigin(0.5);
+    const concl = this.add.text(0, -40, '💡 ' + this.level.conclusion, {
+      fontFamily: FONT, fontSize: 23, color: '#eaf2ff', wordWrap: { width: W - 110 }, align: 'center', lineSpacing: 6
+    }).setOrigin(0.5);
+    const stats = this.add.text(0, 60, '📋 Факти: 3/3      💚 Емпатія: ' + GameState.data.empathy + '%', {
+      fontFamily: FONT, fontSize: 20, color: '#9fb0cc'
+    }).setOrigin(0.5);
+    const btn = makeButton(this, 0, H / 2 - 62, 340, 60, isLast ? '🌟 До фіналу' : '➡️ Наступний рівень', {
+      stroke: COLORS.green, fill: 0x14301f, fillHover: 0x1b4029, fontSize: 23,
+      onClick: () => {
+        if (isLast) this.scene.start('Final');
+        else this.scene.start('Level', { levelId: this.levelId + 1 });
+      }
+    });
+    cont.add([panel, title, concl, stats, btn]);
+    this.tweens.add({ targets: cont, alpha: 1, duration: 400, delay: 350 });
+  }
+}
+
+/* ============================================================================
+ * 8. ФІНАЛЬНА СЦЕНА
+ * ==========================================================================*/
+class FinalScene extends Phaser.Scene {
+  constructor() { super('Final'); }
+
+  create() {
+    const S = GameState.data;
+    this.cameras.main.setBackgroundColor(0x0a0e1a);
+
+    const deco = this.add.graphics();
+    deco.fillStyle(0xff6b35, 0.06); deco.fillCircle(180, 140, 200);
+    deco.fillStyle(0x4ade80, 0.06); deco.fillCircle(860, 620, 240);
+
+    this.add.text(512, 78, '🎉 ГРУ ЗАВЕРШЕНО!', {
+      fontFamily: FONT, fontSize: 52, fontStyle: 'bold', color: '#ff6b35'
+    }).setOrigin(0.5);
+
+    // --- Блок статистики ---
+    const stG = this.add.graphics();
+    roundRect(stG, 212, 130, 600, 190, 18, COLORS.panel, 0.95, COLORS.panelLine, 2);
+    const doneCount = Object.keys(S.completed).filter(k => S.completed[k]).length;
+    let dyn;
+    if (S.empathy > 80) dyn = '🌟 Ти — справжній захисник! Твоя емпатія змінює світ.';
+    else if (S.empathy >= 50) dyn = '💪 Хороший результат! Ти знаєш, як діяти в критичній ситуації.';
+    else dyn = '💙 Попереду ще практика, але головне ти вже знаєш: насильство не можна ігнорувати.';
+    this.add.text(512, 168, 'Пройдено рівнів: ' + doneCount + '/8', {
+      fontFamily: FONT, fontSize: 26, fontStyle: 'bold', color: '#eaf2ff'
+    }).setOrigin(0.5);
+    this.add.text(512, 208, 'Фінальний рівень Емпатії: ' + S.empathy + '%', {
+      fontFamily: FONT, fontSize: 26, fontStyle: 'bold', color: '#4ade80'
+    }).setOrigin(0.5);
+    this.add.text(512, 258, dyn, {
+      fontFamily: FONT, fontSize: 21, color: '#ffd7cd', wordWrap: { width: 540 }, align: 'center'
+    }).setOrigin(0.5);
+
+    // --- Блок контактів (зелена рамка) ---
+    const cG = this.add.graphics();
+    roundRect(cG, 212, 348, 600, 220, 18, 0x0f1a14, 0.96, 0x4ade80, 3);
+    this.add.text(512, 386, '📞 КОНТАКТИ ДОПОМОГИ (Україна)', {
+      fontFamily: FONT, fontSize: 26, fontStyle: 'bold', color: '#4ade80'
+    }).setOrigin(0.5);
+    this.add.text(512, 428, [
+      'Дитяча гаряча лінія: 0 800 500 225 (безкоштовно)',
+      'Ла Страда (протидія насильству): 0 800 500 335',
+      'Поліція: 102   |   Швидка: 103'
+    ].join('\n'), { fontFamily: FONT, fontSize: 22, color: '#eaf2ff', align: 'center', lineSpacing: 8 }).setOrigin(0.5);
+    this.add.text(512, 532, 'Поруч завжди є люди, готові допомогти. Твій голос має значення.', {
+      fontFamily: FONT, fontSize: 17, color: '#9fb0cc', wordWrap: { width: 540 }, align: 'center'
+    }).setOrigin(0.5);
+
+    // --- Кнопки ---
+    makeButton(this, 380, 640, 300, 62, '🔄 Пройти знову', {
+      stroke: COLORS.accent, fill: 0x2a1a10, fillHover: 0x3d2415, fontSize: 22,
+      onClick: function () {
+        try { window.localStorage.removeItem(SAVE_KEY); } catch (e) {}
+        window.location.reload();
+      }
+    });
+    makeButton(this, 668, 640, 240, 62, '🏠 До меню', {
+      stroke: COLORS.panelLine, fill: 0x1b2440, fillHover: 0x27345c, fontSize: 22,
+      onClick: () => this.scene.start('Menu')
+    });
+
+    this.add.text(512, 726, 'Дякуємо, що граєш у «16 днів: Голос, який чути» 💚', {
+      fontFamily: FONT, fontSize: 16, color: '#6b7a99'
+    }).setOrigin(0.5);
+
+    SoundKit.win();
+  }
+}
+
+/* ============================================================================
+ * 9. КОНФІГУРАЦІЯ PHASER
+ * ==========================================================================*/
+if (typeof Phaser !== 'undefined') {
+  const config = {
+    type: Phaser.AUTO,
+    parent: 'game-container',
+    backgroundColor: '#0a0e1a',
+    scale: {
+      mode: Phaser.Scale.FIT,
+      autoCenter: Phaser.Scale.CENTER_BOTH,
+      width: 1024,
+      height: 768
+    },
+    scene: [BootScene, MenuScene, LevelScene, FinalScene]
+  };
+  window.GAME = new Phaser.Game(config);
+  // Перший клік розблоковує аудіо
+  window.addEventListener('pointerdown', function once() {
+    SoundKit.ensure();
+    window.removeEventListener('pointerdown', once);
+  });
+}
+</script>
+</body>
+</html>
